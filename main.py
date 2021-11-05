@@ -1,6 +1,6 @@
 import json
 import time
-from datetime import datetime
+import os
 from json import loads as json_loads
 from os import path as os_path, getenv
 from sys import exit as sys_exit
@@ -11,9 +11,12 @@ import easyocr
 import io
 import numpy
 from PIL import Image
+from PIL import ImageEnhance
 
 
-from requests import session, post
+from requests import session, post, adapters
+adapters.DEFAULT_RETRIES = 5
+
 
 
 class Fudan:
@@ -34,6 +37,7 @@ class Fudan:
         :param url_login: 登录页，默认服务为空
         """
         self.session = session()
+        self.session.keep_alive = False
         self.session.headers['User-Agent'] = self.UA
         self.url_login = url_login
         self.url_code = url_code
@@ -150,12 +154,14 @@ class Zlapp(Fudan):
         #print("◉上一次提交地址为:", position['formattedAddress'])
         # print("◉上一次提交GPS为", position["position"])
         # print(last_info)
+        
+        # 改为上海时区
+        os.environ['TZ'] = 'Asia/Shanghai'
+        time.tzset()
+        today = time.strftime("%Y%m%d", time.localtime())
+        print("◉今日日期为:", today)
 
-        date = datetime.now(pytz.timezone("Asia/Shanghai"))
-        today = str(date.year) + str(date.month) + str(date.day)
-        #print( "today in localtime is :", time.strftime("%Y%m%d", time.localtime()))
-        print( "today in Shanghai timezone is :", today)
-	
+        
         if last_info["d"]["info"]["date"] == today:
                 print("\n*******今日已提交*******")
                 self.close()
@@ -164,10 +170,24 @@ class Zlapp(Fudan):
                 self.last_info = last_info["d"]["oldInfo"]
             
     def read_captcha(self, img_byte):
-        image = numpy.array(Image.open(io.BytesIO(img_byte)))
+        img = Image.open(io.BytesIO(img_byte)).convert('L')
+        enh_bri = ImageEnhance.Brightness(img)
+        new_img = enh_bri.enhance(factor=1.5)
+
+        image = numpy.array(new_img)
         reader = easyocr.Reader(['en'])
-        result = reader.readtext(image, detail = 0)
+        horizontal_list, free_list = reader.detect(image, optimal_num_chars=4)
+        character = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        allow_list = list(character)
+        allow_list.extend(list(character.lower()))
+
+        result = reader.recognize(image, 
+                                allowlist=allow_list,
+                                horizontal_list=horizontal_list[0],
+                                free_list=free_list[0],
+                                detail = 0)
         return result[0]
+    
 
     def validate_code(self):
         img = self.session.get(self.url_code).content
@@ -206,6 +226,7 @@ class Zlapp(Fudan):
             print("◉验证码为:", code)
             self.last_info.update(
                 {
+
 			"tw"            : "13",
 			"province"      : province,
 			"city"          : city,
@@ -219,6 +240,7 @@ class Zlapp(Fudan):
 			"code": code,
 		}
 	    )
+
             # print(self.last_info)
             save = self.session.post(
                 'https://zlapp.fudan.edu.cn/ncov/wap/fudan/save',
@@ -231,8 +253,6 @@ class Zlapp(Fudan):
             time.sleep(0.1)
             if(json_loads(save.text)["e"] != 1):
                 break
-            
-
 
 def get_account():
     """
