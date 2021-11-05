@@ -1,7 +1,6 @@
 import json
 import time
 from datetime import datetime
-import pytz
 from json import loads as json_loads
 from os import path as os_path, getenv
 from sys import exit as sys_exit
